@@ -101,7 +101,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             }
             button.setOnTouchListener(object : View.OnTouchListener {
                 private var startX = 0
-                private var startY = 0
+                private var touchStartY = 0
                 private var downX = 0f
                 private var downY = 0f
                 private var dragged = false
@@ -109,7 +109,7 @@ class JarvisAccessibilityService : AccessibilityService() {
                     when (event.action) {
                         MotionEvent.ACTION_DOWN -> {
                             startX = params.x
-                            startY = params.y
+                            touchStartY = params.y
                             downX = event.rawX
                             downY = event.rawY
                             dragged = false
@@ -120,7 +120,7 @@ class JarvisAccessibilityService : AccessibilityService() {
                             val dy = (event.rawY - downY).toInt()
                             if (abs(dx) + abs(dy) > 8) dragged = true
                             params.x = if (alignLeft) startX + dx else startX - dx
-                            params.y = startY + dy
+                            params.y = touchStartY + dy
                             manager.updateViewLayout(view, params)
                             return true
                         }

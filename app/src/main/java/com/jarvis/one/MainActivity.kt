@@ -813,13 +813,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun exportAllChats() {
         scope.launch {
             val dao = ChatDatabase.get(this@MainActivity).chatDao()
-            val content = dao.chatSummaries().joinToString("\n\n") { chat ->
+            val sections = mutableListOf<String>()
+            for (chat in dao.chatSummaries()) {
                 val title = AppPrefs.chatTitle(this@MainActivity, chat.chatId)
                     .ifBlank { chat.preview.orEmpty().take(48) }
-                "=== $title ===\n" + dao.messages(chat.chatId).joinToString("\n\n") {
+                val messages = dao.messages(chat.chatId).joinToString("\n\n") {
                     "${if (it.role == "user") "You" else "Jarvis"}: ${it.content}"
                 }
+                sections += "=== $title ===\n$messages"
             }
+            val content = sections.joinToString("\n\n")
             shareExport(content, "jarvis-all-chats.txt", "Export all chats")
         }
     }
