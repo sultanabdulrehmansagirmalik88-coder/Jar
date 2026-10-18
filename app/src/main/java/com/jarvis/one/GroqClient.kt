@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Call
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -78,7 +79,8 @@ object GroqClient {
         context: Context,
         messages: List<Pair<String, String>>,
         onText: (String) -> Unit,
-        systemPrompt: String = AppPrefs.systemPrompt(context)
+        systemPrompt: String = AppPrefs.systemPrompt(context),
+        onCall: (Call?) -> Unit = {}
     ): AiReply = withContext(Dispatchers.IO) {
         val key = AppPrefs.get(context, "api_key").trim()
         if (key.isEmpty()) throw IOException("Enter an API key in Settings.")
@@ -94,26 +96,32 @@ object GroqClient {
         val request = Request.Builder().url(endpoint).header("Authorization", "Bearer $key")
             .post(body).build()
         val raw = StringBuilder()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val details = response.body?.string().orEmpty()
-                throw IOException("API error ${response.code}: ${details.ifBlank { response.message }}")
-            }
-            val source = response.body?.source() ?: throw IOException("API returned an empty response.")
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: continue
-                if (!line.startsWith("data:")) continue
-                val data = line.removePrefix("data:").trim()
-                if (data == "[DONE]") break
-                val content = runCatching {
-                    JSONObject(data).getJSONArray("choices").getJSONObject(0)
-                        .getJSONObject("delta").optString("content")
-                }.getOrNull().orEmpty()
-                if (content.isNotEmpty()) {
-                    raw.append(content)
-                    onText(raw.toString())
+        val call = client.newCall(request)
+        onCall(call)
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val details = response.body?.string().orEmpty()
+                    throw IOException("API error ${response.code}: ${details.ifBlank { response.message }}")
+                }
+                val source = response.body?.source() ?: throw IOException("API returned an empty response.")
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: continue
+                    if (!line.startsWith("data:")) continue
+                    val data = line.removePrefix("data:").trim()
+                    if (data == "[DONE]") break
+                    val content = runCatching {
+                        JSONObject(data).getJSONArray("choices").getJSONObject(0)
+                            .getJSONObject("delta").optString("content")
+                    }.getOrNull().orEmpty()
+                    if (content.isNotEmpty()) {
+                        raw.append(content)
+                        onText(raw.toString())
+                    }
                 }
             }
+        } finally {
+            onCall(null)
         }
         parseReply(raw.toString())
     }

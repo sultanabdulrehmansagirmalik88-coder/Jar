@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Color
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import org.json.JSONArray
+import org.json.JSONObject
 
 object AppPrefs {
     const val DEFAULT_MODEL = "llama-3.3-70b-versatile"
@@ -52,7 +54,6 @@ object AppPrefs {
 
     fun systemPrompt(context: Context): String {
         val custom = get(context, "system_prompt").trim()
-        if (custom.isNotEmpty()) return custom
         val persona = get(context, "persona", "Jarvis")
         val style = when (persona) {
             "Friendly" -> "Be especially warm and conversational."
@@ -60,6 +61,74 @@ object AppPrefs {
             "Coding Teacher" -> "Teach patiently and explain code simply."
             else -> ""
         }
-        return "$DEFAULT_PROMPT $style"
+        val basePrompt = custom.ifBlank { DEFAULT_PROMPT }
+        val length = when (get(context, "reply_length", "Normal")) {
+            "Short" -> "Keep replies to one or two short sentences unless detail is requested."
+            "Detailed" -> "Give thorough, well-organized answers with useful steps and context."
+            else -> "Keep answers concise."
+        }
+        return "$basePrompt $style $length"
+    }
+
+    fun speechRate(context: Context): Float = when (get(context, "speech_speed", "Normal")) {
+        "Slow" -> 0.8f
+        "Fast" -> 1.2f
+        else -> 1f
+    }
+
+    fun chatTitle(context: Context, chatId: String): String = get(context, "chat_title_$chatId")
+
+    fun setChatTitle(context: Context, chatId: String, title: String) {
+        put(context, "chat_title_$chatId", title)
+    }
+
+    fun isChatPinned(context: Context, chatId: String): Boolean =
+        bool(context, "chat_pinned_$chatId")
+
+    fun setChatPinned(context: Context, chatId: String, pinned: Boolean) {
+        putBool(context, "chat_pinned_$chatId", pinned)
+    }
+
+    fun clearChatMetadata(context: Context) {
+        val editor = prefs(context).edit()
+        prefs(context).all.keys
+            .filter { it.startsWith("chat_title_") || it.startsWith("chat_pinned_") }
+            .forEach(editor::remove)
+        editor.apply()
+    }
+
+    fun resolveShortcut(context: Context, text: String): String {
+        val line = get(context, "command_shortcuts").lineSequence()
+            .mapNotNull { entry ->
+                val separator = entry.indexOf("=>")
+                if (separator < 0) null else {
+                    val shortcut = entry.substring(0, separator).trim()
+                    val command = entry.substring(separator + 2).trim()
+                    if (shortcut.isBlank() || command.isBlank()) null else shortcut to command
+                }
+            }
+            .firstOrNull { (shortcut, _) -> shortcut.equals(text.trim(), ignoreCase = true) }
+        return line?.second ?: text
+    }
+
+    fun recordRecentAction(context: Context, action: JSONObject) {
+        val entries = JSONArray(get(context, "recent_actions", "[]"))
+        val updated = JSONArray()
+        val type = action.optString("type")
+        val sensitive = type in setOf("call", "sms", "whatsapp")
+        updated.put(JSONObject()
+            .put("type", type)
+            .put("detail", if (sensitive) "" else action.optString("direction", action.optString("name")))
+            .put("time", System.currentTimeMillis())
+            .put("payload", if (type == "volume") action.toString() else ""))
+        for (index in 0 until minOf(entries.length(), 19)) {
+            updated.put(entries.getJSONObject(index))
+        }
+        put(context, "recent_actions", updated.toString())
+    }
+
+    fun recentActions(context: Context): List<JSONObject> {
+        val entries = JSONArray(get(context, "recent_actions", "[]"))
+        return (0 until entries.length()).map(entries::getJSONObject)
     }
 }

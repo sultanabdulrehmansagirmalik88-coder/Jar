@@ -123,9 +123,31 @@ object ActionDispatcher {
                 }
                 else -> notify("Unsupported action: $type")
             }
+            if (type != "undo") {
+                try {
+                    AppPrefs.recordRecentAction(context, action)
+                } catch (error: Exception) {
+                    android.util.Log.e("ActionDispatcher", "Could not save action history.", error)
+                }
+            }
         } catch (error: Exception) {
             notify(error.message ?: "Could not perform $type.")
         }
+    }
+
+    fun undoLastSupportedAction(context: Context): Boolean {
+        val entry = AppPrefs.recentActions(context).firstOrNull() ?: return false
+        if (entry.optString("type") != "volume") return false
+        val action = JSONObject(entry.optString("payload"))
+        val direction = if (action.optString("direction") == "down") {
+            AudioManager.ADJUST_RAISE
+        } else {
+            AudioManager.ADJUST_LOWER
+        }
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+        AppPrefs.recordRecentAction(context, JSONObject().put("type", "undo").put("direction", "volume"))
+        return true
     }
 
     private fun openApp(context: Context, label: String) {

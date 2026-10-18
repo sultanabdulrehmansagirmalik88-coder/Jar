@@ -5,9 +5,9 @@ import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
 import android.graphics.PixelFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -31,7 +31,7 @@ import kotlin.math.abs
 
 class JarvisAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private lateinit var windowManager: WindowManager
+    private var windowManager: WindowManager? = null
     private var bubble: ImageButton? = null
     private var panel: View? = null
     private var panelReply: TextView? = null
@@ -39,10 +39,16 @@ class JarvisAccessibilityService : AccessibilityService() {
     private var bubbleTts: android.speech.tts.TextToSpeech? = null
 
     override fun onServiceConnected() {
-        super.onServiceConnected()
-        serviceReference = WeakReference(this)
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        showBubble()
+        try {
+            super.onServiceConnected()
+            windowManager = getSystemService(WindowManager::class.java)
+                ?: throw IllegalStateException("WindowManager is unavailable.")
+            refreshBubble()
+            serviceReference = WeakReference(this)
+        } catch (error: Exception) {
+            serviceReference = null
+            Log.e(TAG, "Could not initialize accessibility service.", error)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -60,74 +66,89 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     fun showBubble() {
         if (bubble != null) return
-        val button = ImageButton(this).apply {
-            setImageResource(R.drawable.logo)
-            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(0xff3978f6.toInt())
-            }
-            contentDescription = "Open Jarvis command panel"
-            setPadding(0, 0, 0, 0)
-        }
-        val density = resources.displayMetrics.density
-        val params = WindowManager.LayoutParams(
-            (56 * density).toInt(), (56 * density).toInt(),
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = (12 * density).toInt()
-            y = (180 * density).toInt()
-        }
-        button.setOnTouchListener(object : View.OnTouchListener {
-            private var startX = 0
-            private var startY = 0
-            private var downX = 0f
-            private var downY = 0f
-            private var dragged = false
-            override fun onTouch(view: View, event: MotionEvent): Boolean {
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        startX = params.x
-                        startY = params.y
-                        downX = event.rawX
-                        downY = event.rawY
-                        dragged = false
-                        return true
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - downX).toInt()
-                        val dy = (event.rawY - downY).toInt()
-                        if (abs(dx) + abs(dy) > 8) dragged = true
-                        params.x = startX - dx
-                        params.y = startY + dy
-                        windowManager.updateViewLayout(view, params)
-                        return true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        if (!dragged) {
-                            view.performClick()
-                        }
-                        return true
-                    }
-                }
-                return false
-            }
-        })
-        button.setOnClickListener {
-            if (gameRunning || GameAgentService.isRunning) {
-                stopService(android.content.Intent(this@JarvisAccessibilityService, GameAgentService::class.java))
-                gameRunning = false
-                updateBubbleState()
-            } else showPanel()
-        }
         try {
-            windowManager.addView(button, params)
+            val manager = windowManager
+                ?: throw IllegalStateException("WindowManager is not initialized.")
+            val button = ImageButton(this).apply {
+                setImageResource(R.drawable.logo)
+                scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(0xff3978f6.toInt())
+                }
+                contentDescription = "Open Jarvis command panel"
+                setPadding(0, 0, 0, 0)
+            }
+            val density = resources.displayMetrics.density
+            val position = AppPrefs.get(this, "bubble_position", "Top right")
+            val alignLeft = position == "Top left"
+            val startY = when (position) {
+                "Middle right" -> (resources.displayMetrics.heightPixels / 2) - (28 * density).toInt()
+                "Bottom right" -> resources.displayMetrics.heightPixels - (120 * density).toInt()
+                else -> (180 * density).toInt()
+            }
+            val params = WindowManager.LayoutParams(
+                (56 * density).toInt(), (56 * density).toInt(),
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or (if (alignLeft) Gravity.START else Gravity.END)
+                x = AppPrefs.get(this@JarvisAccessibilityService, "bubble_x")
+                    .toIntOrNull() ?: (12 * density).toInt()
+                y = AppPrefs.get(this@JarvisAccessibilityService, "bubble_y")
+                    .toIntOrNull() ?: startY.coerceAtLeast(0)
+            }
+            button.setOnTouchListener(object : View.OnTouchListener {
+                private var startX = 0
+                private var startY = 0
+                private var downX = 0f
+                private var downY = 0f
+                private var dragged = false
+                override fun onTouch(view: View, event: MotionEvent): Boolean {
+                    when (event.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            startX = params.x
+                            startY = params.y
+                            downX = event.rawX
+                            downY = event.rawY
+                            dragged = false
+                            return true
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dx = (event.rawX - downX).toInt()
+                            val dy = (event.rawY - downY).toInt()
+                            if (abs(dx) + abs(dy) > 8) dragged = true
+                            params.x = if (alignLeft) startX + dx else startX - dx
+                            params.y = startY + dy
+                            manager.updateViewLayout(view, params)
+                            return true
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            if (!dragged) {
+                                view.performClick()
+                            } else {
+                                AppPrefs.put(this@JarvisAccessibilityService, "bubble_x", params.x.toString())
+                                AppPrefs.put(this@JarvisAccessibilityService, "bubble_y", params.y.toString())
+                            }
+                            return true
+                        }
+                    }
+                    return false
+                }
+            })
+            button.setOnClickListener {
+                if (gameRunning || GameAgentService.isRunning) {
+                    stopService(android.content.Intent(this@JarvisAccessibilityService, GameAgentService::class.java))
+                    gameRunning = false
+                    updateBubbleState()
+                } else showPanel()
+            }
+            manager.addView(button, params)
             bubble = button
             updateBubbleState()
         } catch (error: Exception) {
+            Log.e(TAG, "Could not create accessibility bubble.", error)
             Toast.makeText(this, "Could not show Jarvis bubble: ${error.message}", Toast.LENGTH_LONG).show()
         }
     }
@@ -139,8 +160,26 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
     }
 
+    fun refreshBubble() {
+        removeBubble()
+        if (AppPrefs.bool(this, "bubble_enabled", true)) showBubble()
+    }
+
     private fun showPanel() {
+        try {
+            createPanel()
+        } catch (error: Exception) {
+            Log.e(TAG, "Could not create command panel.", error)
+            Toast.makeText(this, "Could not open command panel: ${error.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun createPanel() {
         if (panel != null) return
+        val manager = windowManager ?: run {
+            Log.e(TAG, "Could not open command panel: WindowManager is not initialized.")
+            return
+        }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(10))
@@ -198,14 +237,15 @@ class JarvisAccessibilityService : AccessibilityService() {
             y = dp(32)
         }
         try {
-            windowManager.addView(root, params)
+            manager.addView(root, params)
             panel = root
             field.requestFocus()
             params.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-            windowManager.updateViewLayout(root, params)
+            manager.updateViewLayout(root, params)
             val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
             Handler(Looper.getMainLooper()).postDelayed({ imm.showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }, 250)
         } catch (error: Exception) {
+            Log.e(TAG, "Could not open command panel.", error)
             Toast.makeText(this, "Could not open command panel: ${error.message}", Toast.LENGTH_LONG).show()
         }
     }
@@ -215,29 +255,37 @@ class JarvisAccessibilityService : AccessibilityService() {
             Toast.makeText(this, "Open Jarvis1 and allow microphone permission first.", Toast.LENGTH_LONG).show()
             return
         }
-        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
-            Toast.makeText(this, "Speech recognition is unavailable.", Toast.LENGTH_LONG).show()
-            return
-        }
-        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this)
-        recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
-            override fun onReadyForSpeech(params: android.os.Bundle?) = Unit
-            override fun onBeginningOfSpeech() = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
-            override fun onBufferReceived(buffer: ByteArray?) = Unit
-            override fun onEndOfSpeech() = Unit
-            override fun onError(error: Int) { recognizer.destroy() }
-            override fun onResults(results: android.os.Bundle?) {
-                field.setText(results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull())
-                recognizer.destroy()
+        var recognizer: android.speech.SpeechRecognizer? = null
+        try {
+            if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) {
+                Toast.makeText(this, "Speech recognition is unavailable.", Toast.LENGTH_LONG).show()
+                return
             }
-            override fun onPartialResults(partialResults: android.os.Bundle?) = Unit
-            override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
-        })
-        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-        recognizer.startListening(intent)
+            val activeRecognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(this)
+            recognizer = activeRecognizer
+            activeRecognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+                override fun onReadyForSpeech(params: android.os.Bundle?) = Unit
+                override fun onBeginningOfSpeech() = Unit
+                override fun onRmsChanged(rmsdB: Float) = Unit
+                override fun onBufferReceived(buffer: ByteArray?) = Unit
+                override fun onEndOfSpeech() = Unit
+                override fun onError(error: Int) { activeRecognizer.destroy() }
+                override fun onResults(results: android.os.Bundle?) {
+                    field.setText(results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull())
+                    activeRecognizer.destroy()
+                }
+                override fun onPartialResults(partialResults: android.os.Bundle?) = Unit
+                override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
+            })
+            val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            activeRecognizer.startListening(intent)
+        } catch (error: Exception) {
+            recognizer?.destroy()
+            Log.e(TAG, "Could not start speech recognition.", error)
+            Toast.makeText(this, "Could not start speech recognition: ${error.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun submitPanel(text: String) {
@@ -266,6 +314,7 @@ class JarvisAccessibilityService : AccessibilityService() {
                                 "Hindi" -> Locale("hi")
                                 else -> Locale.ENGLISH
                             }
+                            bubbleTts?.setSpeechRate(AppPrefs.speechRate(this@JarvisAccessibilityService))
                             bubbleTts?.speak(reply.text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "bubble-reply")
                         }
                     }
@@ -283,13 +332,25 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     private fun removePanel() {
-        panel?.let { runCatching { windowManager.removeView(it) } }
+        panel?.let { view ->
+            try {
+                windowManager?.removeView(view)
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not remove command panel.", error)
+            }
+        }
         panel = null
         panelReply = null
     }
 
     private fun removeBubble() {
-        bubble?.let { runCatching { windowManager.removeView(it) } }
+        bubble?.let { view ->
+            try {
+                windowManager?.removeView(view)
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not remove accessibility bubble.", error)
+            }
+        }
         bubble = null
     }
 
@@ -356,6 +417,7 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        private const val TAG = "JarvisAccessibility"
         @Volatile private var serviceReference: WeakReference<JarvisAccessibilityService>? = null
         val instance: JarvisAccessibilityService? get() = serviceReference?.get()
         fun openPanel(context: Context) {

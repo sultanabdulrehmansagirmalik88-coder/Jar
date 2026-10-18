@@ -25,12 +25,18 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var promptField: EditText
     private lateinit var persona: Spinner
     private lateinit var voiceLanguage: Spinner
+    private lateinit var replyLength: Spinner
+    private lateinit var speechSpeed: Spinner
+    private lateinit var bubblePosition: Spinner
     private lateinit var speakSwitch: SwitchMaterial
     private lateinit var themeSwitch: SwitchMaterial
     private lateinit var handsFreeSwitch: SwitchMaterial
+    private lateinit var bubbleSwitch: SwitchMaterial
     private lateinit var status: TextView
     private lateinit var routineField: EditText
     private lateinit var routineNameField: EditText
+    private lateinit var quickPromptsField: EditText
+    private lateinit var shortcutsField: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         AppCompatDelegate.setDefaultNightMode(
@@ -90,6 +96,22 @@ class SettingsActivity : AppCompatActivity() {
         content.addView(speakSwitch)
         voiceLanguage = spinner(arrayOf("English", "Urdu", "Hindi"), AppPrefs.get(this, "voice_language", "English"))
         addSpinner(content, "Voice language", voiceLanguage)
+        replyLength = spinner(arrayOf("Short", "Normal", "Detailed"), AppPrefs.get(this, "reply_length", "Normal"))
+        addSpinner(content, "Reply length", replyLength)
+        speechSpeed = spinner(arrayOf("Slow", "Normal", "Fast"), AppPrefs.get(this, "speech_speed", "Normal"))
+        addSpinner(content, "Speech speed", speechSpeed)
+        quickPromptsField = field("Quick prompts, one per line").apply {
+            minLines = 3
+            gravity = Gravity.TOP
+            setText(AppPrefs.get(this@SettingsActivity, "quick_prompts"))
+        }
+        addField(content, quickPromptsField)
+        shortcutsField = field("Command shortcuts: shortcut => full request, one per line").apply {
+            minLines = 3
+            gravity = Gravity.TOP
+            setText(AppPrefs.get(this@SettingsActivity, "command_shortcuts"))
+        }
+        addField(content, shortcutsField)
 
         content.addView(title("Assistant style"))
         persona = spinner(arrayOf("Jarvis", "Friendly", "Girlfriend (Yasmin style)", "Coding Teacher"),
@@ -117,6 +139,17 @@ class SettingsActivity : AppCompatActivity() {
                 toast("Accent colour set to ${colors[which]}. Reopen the app to apply.")
             }.show()
         }
+        bubbleSwitch = SwitchMaterial(this).apply {
+            text = "Show floating Jarvis bubble"
+            setTextColor(AppPrefs.textColor(this@SettingsActivity))
+            isChecked = AppPrefs.bool(this@SettingsActivity, "bubble_enabled", true)
+        }
+        content.addView(bubbleSwitch)
+        bubblePosition = spinner(
+            arrayOf("Top right", "Top left", "Middle right", "Bottom right"),
+            AppPrefs.get(this, "bubble_position", "Top right")
+        )
+        addSpinner(content, "Bubble starting position", bubblePosition)
 
         content.addView(title("Hands-free"))
         handsFreeSwitch = SwitchMaterial(this).apply {
@@ -149,14 +182,27 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun save(applyTheme: Boolean = true) {
+        val bubblePositionChanged = AppPrefs.get(this, "bubble_position", "Top right") !=
+            bubblePosition.selectedItem.toString()
         AppPrefs.put(this, "api_key", keyField.text.toString().trim())
         AppPrefs.put(this, "model", modelField.text.toString().trim().ifBlank { AppPrefs.DEFAULT_MODEL })
         AppPrefs.put(this, "system_prompt", promptField.text.toString().trim())
         AppPrefs.put(this, "persona", persona.selectedItem.toString())
         AppPrefs.put(this, "voice_language", voiceLanguage.selectedItem.toString())
+        AppPrefs.put(this, "reply_length", replyLength.selectedItem.toString())
+        AppPrefs.put(this, "speech_speed", speechSpeed.selectedItem.toString())
+        AppPrefs.put(this, "quick_prompts", quickPromptsField.text.toString())
+        AppPrefs.put(this, "command_shortcuts", shortcutsField.text.toString())
         AppPrefs.putBool(this, "speak_replies", speakSwitch.isChecked)
         AppPrefs.putBool(this, "light_theme", themeSwitch.isChecked)
         AppPrefs.putBool(this, "hands_free", handsFreeSwitch.isChecked)
+        AppPrefs.putBool(this, "bubble_enabled", bubbleSwitch.isChecked)
+        AppPrefs.put(this, "bubble_position", bubblePosition.selectedItem.toString())
+        if (bubblePositionChanged) {
+            AppPrefs.put(this, "bubble_x", "")
+            AppPrefs.put(this, "bubble_y", "")
+        }
+        JarvisAccessibilityService.instance?.refreshBubble()
         saveRoutine()
         if (applyTheme) {
             AppCompatDelegate.setDefaultNightMode(
