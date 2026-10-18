@@ -21,12 +21,14 @@ jobs:
             build-tools;34.0.0
           accept-android-sdk-licenses: true
       - uses: gradle/actions/setup-gradle@v5
-        with:
-          gradle-version: 8.4
       - name: Ensure Gradle wrapper is executable
         run: chmod +x gradlew
+      - name: Print Java and Gradle versions
+        run: |
+          java -version
+          ./gradlew --version
       - name: Build APK and release bundle
-        run: ./gradlew :app:assembleDebug :app:bundleRelease --no-daemon --console=plain --stacktrace
+        run: ./gradlew :app:assembleDebug :app:bundleRelease --no-daemon --console=plain --stacktrace --warning-mode=all
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
