@@ -1,10 +1,10 @@
-name: Zip repository and upload
+name: Create release and upload repo files as release assets
 
 on:
   workflow_dispatch:
     inputs:
       create_release:
-        description: 'Set to "true" to also create a GitHub Release and upload the zip as an asset'
+        description: 'Set to "true" to create a release and upload files as assets'
         required: false
         default: 'false'
       release_tag:
@@ -17,27 +17,15 @@ on:
       - master
 
 jobs:
-  zip-and-upload:
+  release-and-upload:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Create ZIP of repository
-        run: |
-          ZIP_NAME="${{ github.repository }}-${{ github.sha }}.zip"
-          # exclude .git directory and GitHub workflow files inside .github/workflows if you want:
-          zip -r "$ZIP_NAME" . -x ".git/*" ".github/workflows/*"
-          echo "Created $ZIP_NAME"
-        shell: bash
-
-      - name: Upload ZIP as workflow artifact
-        uses: actions/upload-artifact@v4
         with:
-          name: repo-zip
-          path: ${{ github.repository }}-${{ github.sha }}.zip
+          fetch-depth: 0
 
-      - name: Create GitHub Release (optional)
+      - name: Create GitHub Release (if requested)
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
         id: create_release
         uses: actions/create-release@v1
@@ -49,13 +37,23 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload ZIP to Release (optional)
+      - name: Upload all tracked files to the Release as assets
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ github.repository }}-${{ github.sha }}.zip
-          asset_name: ${{ github.repository }}-${{ github.sha }}.zip
-          asset_content_type: application/zip
+        run: |
+          set -euo pipefail
+          UPLOAD_URL="${{ steps.create_release.outputs.upload_url }}"
+          UPLOAD_URL="${UPLOAD_URL%\{*}"
+          echo "Uploading files to $UPLOAD_URL"
+
+          git ls-files | while IFS= read -r file; do
+            echo "Uploading: $file"
+            filename_enc=$(python3 -c "import sys,urllib.parse as u; print(u.quote(sys.argv[1]))" "$file")
+            curl -sSf -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$file" \
+              "$UPLOAD_URL?name=$filename_enc" || echo "Failed to upload $file"
+          done
+        shell: bash
