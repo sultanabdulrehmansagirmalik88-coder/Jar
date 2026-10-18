@@ -1,0 +1,13 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:background="#202633">
+    <ImageButton
+        android:id="@+id/widget_mic"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="?android:selectableItemBackground"
+        android:contentDescription="Open Jarvis command"
+        android:src="@drawable/logo" />
+</LinearLayout>

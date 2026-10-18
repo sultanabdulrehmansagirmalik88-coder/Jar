@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Jarvis1</string>
+    <string name="accessibility_service_name">Jarvis1 Screen Control</string>
+    <string name="accessibility_service_description">Read visible screen text and perform actions you request.</string>
+</resources>
