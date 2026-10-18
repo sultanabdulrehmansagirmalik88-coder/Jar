@@ -4,3 +4,8 @@ local.properties
 **/build/
 *.iml
 .DS_Store
+
+jarvis1-apk/
+*.apk
+*.zip
+err.txt
