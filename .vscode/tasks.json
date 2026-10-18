@@ -4,12 +4,10 @@
 		{
 			"label": "Android: assembleDebug",
 			"type": "shell",
-			"command": "./gradlew",
+			"command": "gradle",
 			"args": [
-				":app:assembleDebug",
-				"--no-daemon",
-				"--console=plain",
-				"--stacktrace"
+				"assembleDebug",
+				"--no-daemon"
 			],
 			"isBackground": false,
 			"problemMatcher": [],
